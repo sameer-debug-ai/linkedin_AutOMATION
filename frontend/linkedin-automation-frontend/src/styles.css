@@ -70,6 +70,7 @@
   .badge-green  { @apply badge bg-emerald-900/50 text-emerald-400 border border-emerald-800; }
   .badge-blue   { @apply badge bg-blue-900/50 text-blue-400 border border-blue-800; }
   .badge-yellow { @apply badge bg-yellow-900/50 text-yellow-400 border border-yellow-800; }
+  .badge-purple { @apply badge bg-purple-900/50 text-purple-400 border border-purple-800; }
   .badge-red    { @apply badge bg-red-900/50 text-red-400 border border-red-800; }
   .badge-gray   { @apply badge bg-slate-800 text-slate-400 border border-slate-700; }
 

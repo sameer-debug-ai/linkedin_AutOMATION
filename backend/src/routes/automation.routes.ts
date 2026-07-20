@@ -1,11 +1,12 @@
 import { Router } from 'express';
-import { startJob, pauseJob, resumeJob, stopJob, getJobs, getJob, getDailyUsage } from '../controllers/automation.controller';
+import { startJob, pauseJob, resumeJob, stopJob, getJobs, getJob, getDailyUsage, syncResponses } from '../controllers/automation.controller';
 import { authenticate } from '../middleware/auth.middleware';
 
 const router = Router();
 router.use(authenticate);
 
 router.post('/start', startJob);
+router.post('/sync-responses', syncResponses);
 router.get('/jobs', getJobs);
 router.get('/daily-usage', getDailyUsage);
 router.get('/jobs/:jobId', getJob);

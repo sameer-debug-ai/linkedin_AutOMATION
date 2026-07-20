@@ -1,10 +1,15 @@
 import { Response, NextFunction } from 'express';
+import CryptoJS from 'crypto-js';
 import { AuthRequest } from '../middleware/auth.middleware';
 import { createError } from '../middleware/error-handler';
 import { AutomationJob } from '../models/AutomationJob.model';
 import { ActivityLog } from '../models/ActivityLog.model';
 import { User } from '../models/User.model';
 import { automationQueue } from '../queue/automation.worker';
+import { env } from '../config/env';
+import { logger } from '../config/logger';
+import { createBrowserContext, closeBrowser } from '../automation/browser';
+import { syncLinkedInResponses } from '../automation/linkedin-sync';
 
 export async function startJob(req: AuthRequest, res: Response, next: NextFunction): Promise<void> {
   try {
@@ -90,4 +95,35 @@ export async function getDailyUsage(req: AuthRequest, res: Response, next: NextF
     ]);
     res.json({ success: true, data: { used, limit: user?.dailyLimit || 25, remaining: Math.max(0, (user?.dailyLimit || 25) - used) } });
   } catch (err) { next(err); }
+}
+
+export async function syncResponses(req: AuthRequest, res: Response, next: NextFunction): Promise<void> {
+  let browser: any;
+  try {
+    const user = await User.findById(req.userId);
+    if (!user) { next(createError('User not found', 404)); return; }
+
+    let cookiesJsonStr: string | undefined;
+    if (user.linkedinCookies) {
+      try {
+        const bytes = CryptoJS.AES.decrypt(user.linkedinCookies, env.encryptionKey);
+        cookiesJsonStr = bytes.toString(CryptoJS.enc.Utf8);
+      } catch (err) {
+        logger.error('[Sync Controller] Failed to decrypt user cookies:', err);
+      }
+    }
+
+    const contextResult = await createBrowserContext(cookiesJsonStr);
+    browser = contextResult.browser;
+    const context = contextResult.context;
+
+    const result = await syncLinkedInResponses(context, String(user._id));
+    res.json({ success: true, data: result });
+  } catch (err) {
+    next(err);
+  } finally {
+    if (browser) {
+      await closeBrowser(browser);
+    }
+  }
 }

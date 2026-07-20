@@ -3,6 +3,7 @@ import { FormsModule } from '@angular/forms';
 import { TruncatePipe } from '../../../shared/pipes/truncate.pipe';
 import { ApiService } from '../../../core/services/api.service';
 import { AuthService } from '../../../core/services/auth.service';
+import { WebSocketService } from '../../../core/services/websocket.service';
 
 export interface Lead {
   _id: string;
@@ -22,7 +23,7 @@ const STATUS_COLORS: Record<string, string> = {
   request_sent: 'badge-blue',
   connected:    'badge-green',
   messaged:     'badge-yellow',
-  replied:      'badge-green',
+  replied:      'badge-purple',
   ignored:      'badge-red',
 };
 
@@ -67,6 +68,13 @@ const STATUS_COLORS: Record<string, string> = {
         </div>
 
         <div class="flex items-center gap-2.5">
+          <button (click)="syncResponses()" [disabled]="syncing()" class="btn-primary h-10 text-sm flex items-center gap-1.5 px-4 font-medium">
+            @if (syncing()) {
+              <span class="animate-spin">⏳</span> Syncing...
+            } @else {
+              💬 Sync Responses
+            }
+          </button>
           <button (click)="exportCsv()" class="btn-secondary h-10 text-sm flex items-center gap-1.5 px-4 font-medium hover:bg-slate-700 transition-colors">
             📥 Export CSV
           </button>
@@ -75,6 +83,12 @@ const STATUS_COLORS: Record<string, string> = {
           </button>
         </div>
       </div>
+
+      @if (syncMessage()) {
+        <div class="p-3 bg-brand-600/20 border border-brand-500/30 rounded-xl text-xs text-brand-300 flex items-center justify-between">
+          <span>{{ syncMessage() }}</span>
+        </div>
+      }
 
       <!-- Table -->
       <div class="card p-0 overflow-hidden">
@@ -208,10 +222,46 @@ export class LeadsTableComponent implements OnInit {
 
   searchQuery  = '';
   statusFilter = '';
+  syncing      = signal(false);
+  syncMessage  = signal('');
 
-  constructor(private api: ApiService, private auth: AuthService) {}
+  constructor(
+    private api: ApiService,
+    private auth: AuthService,
+    private ws: WebSocketService
+  ) {}
 
-  ngOnInit() { this.loadLeads(); }
+  ngOnInit() {
+    this.loadLeads();
+    this.ws.onMessage<{ leadId: string; status: Lead['status'] }>('lead:updated').subscribe((evt) => {
+      if (evt?.leadId) {
+        this.leads.update((list) =>
+          list.map((l) => (l._id === evt.leadId ? { ...l, status: evt.status } : l))
+        );
+      }
+    });
+  }
+
+  syncResponses() {
+    this.syncing.set(true);
+    this.syncMessage.set('Checking connections & replies on LinkedIn...');
+    this.api.post<{ success: boolean; data: { connectedUpdated: number; repliedUpdated: number } }>('/automation/sync-responses', {})
+      .subscribe({
+        next: (res) => {
+          this.syncing.set(false);
+          const c = res.data.connectedUpdated;
+          const r = res.data.repliedUpdated;
+          this.syncMessage.set(`Sync complete: ${c} accepted connections, ${r} new replies.`);
+          this.loadLeads();
+          setTimeout(() => this.syncMessage.set(''), 6000);
+        },
+        error: () => {
+          this.syncing.set(false);
+          this.syncMessage.set('Failed to sync LinkedIn responses.');
+          setTimeout(() => this.syncMessage.set(''), 6000);
+        }
+      });
+  }
 
   loadLeads() {
     this.loading.set(true);

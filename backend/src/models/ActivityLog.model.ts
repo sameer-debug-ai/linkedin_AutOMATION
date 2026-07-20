@@ -6,6 +6,8 @@ export type ActivityAction =
   | 'connect_sent'
   | 'message_sent'
   | 'reply_received'
+  | 'connected'
+  | 'replied'
   | 'job_started'
   | 'job_completed'
   | 'job_failed'
@@ -29,7 +31,7 @@ const ActivityLogSchema = new Schema<IActivityLog>(
     jobId: { type: String },
     action: {
       type: String,
-      enum: ['search','profile_visit','connect_sent','message_sent','reply_received','job_started','job_completed','job_failed','captcha_detected','error'],
+      enum: ['search','profile_visit','connect_sent','message_sent','reply_received','connected','replied','job_started','job_completed','job_failed','captcha_detected','error'],
       required: true,
     },
     details: { type: String, default: '' },

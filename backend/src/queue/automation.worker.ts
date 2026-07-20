@@ -13,6 +13,7 @@ import { verifyLinkedInSession } from '../automation/linkedin-login';
 import { searchLinkedInPeople, normalizeUrl } from '../automation/linkedin-search';
 import { sendConnectionRequest } from '../automation/linkedin-connect';
 import { sendDirectMessage, personaliseTemplate } from '../automation/linkedin-message';
+import { syncLinkedInResponses } from '../automation/linkedin-sync';
 import { randomDelay } from '../automation/human-delay';
 import { getSocketServer } from './socket';
 
@@ -179,7 +180,16 @@ export function createAutomationWorker(): Worker {
                   await lead.updateOne({ status: 'request_sent', templateUsed: template._id, messageSentAt: new Date() });
                   await ActivityLog.create({ userId, leadId: lead._id, jobId, action: 'connect_sent', details: `Sent to ${profile.name}` });
                   successful++;
+                  emit('lead:updated', { leadId: lead._id, status: 'request_sent', name: profile.name });
                   emit('job:log', { message: `✅ Connection request sent to ${profile.name}` });
+                } else if (result === 'already_connected') {
+                  await lead.updateOne({ status: 'connected' });
+                  await ActivityLog.create({ userId, leadId: lead._id, jobId, action: 'connected', details: `${profile.name} is connected` });
+                  emit('lead:updated', { leadId: lead._id, status: 'connected', name: profile.name });
+                  emit('job:log', { message: `🤝 ${profile.name} is already connected` });
+                } else if (result === 'pending') {
+                  await lead.updateOne({ status: 'request_sent' });
+                  emit('lead:updated', { leadId: lead._id, status: 'request_sent', name: profile.name });
                 }
               }
             }
@@ -191,6 +201,7 @@ export function createAutomationWorker(): Worker {
                   await lead.updateOne({ status: 'messaged', templateUsed: template._id, messageSentAt: new Date() });
                   await ActivityLog.create({ userId, leadId: lead._id, jobId, action: 'message_sent', details: `Message sent to ${profile.name}` });
                   successful++;
+                  emit('lead:updated', { leadId: lead._id, status: 'messaged', name: profile.name });
                   emit('job:log', { message: `✅ Message sent to ${profile.name}` });
                 }
               }
@@ -207,6 +218,14 @@ export function createAutomationWorker(): Worker {
             logger.error(`[Worker] Error processing ${profile.profileUrl}:`, err);
             await ActivityLog.create({ userId, jobId, action: 'error', details: `Error on ${profile.name}: ${String(err)}` });
           }
+        }
+
+        // Auto sync connection acceptances & message replies
+        try {
+          emit('job:log', { message: '🔄 Syncing accepted connections and replies...' });
+          await syncLinkedInResponses(context, userId);
+        } catch (syncErr) {
+          logger.error('[Worker] Error running post-job sync:', syncErr);
         }
 
         await AutomationJob.findByIdAndUpdate(jobId, {

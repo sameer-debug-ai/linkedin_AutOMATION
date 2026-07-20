@@ -34,7 +34,8 @@ export class WebSocketService implements OnDestroy {
     this.socket.on('job:log',       (data: JobLog)    => { this.jobLog$.next(data); this.emit('job:log', data); });
     this.socket.on('job:progress',  (data: object)    => { this.jobProgress$.next(data); this.emit('job:progress', data); });
     this.socket.on('job:captcha',   (data: { jobId: string }) => { this.captchaAlert$.next(data); this.emit('captcha:detected', data); });
-    this.socket.on('job:error',     (data: any) => this.emit('job:error', data));
+    this.socket.on('lead:updated',  (data: any)       => this.emit('lead:updated', data));
+    this.socket.on('job:error',     (data: any)       => this.emit('job:error', data));
   }
 
   /** Generic event subscriber — returns an Observable for any Socket.io event */
