@@ -4,6 +4,7 @@ import http from 'http';
 import cors from 'cors';
 import helmet from 'helmet';
 import morgan from 'morgan';
+import { execSync } from 'child_process';
 
 import { env } from './config/env';
 import { connectDatabase } from './config/database';
@@ -208,6 +209,7 @@ function shutdown(signal: string) {
 }
 process.on('SIGTERM', () => shutdown('SIGTERM'));
 process.on('SIGINT',  () => shutdown('SIGINT'));
+process.on('SIGUSR2', () => shutdown('SIGUSR2'));
 
 // Start
 async function bootstrap(): Promise<void> {
@@ -219,8 +221,13 @@ async function bootstrap(): Promise<void> {
 
   httpServer.on('error', (err: NodeJS.ErrnoException) => {
     if (err.code === 'EADDRINUSE') {
-      logger.error(`❌ Port ${env.port} is already in use. Waiting for nodemon to retry...`);
-      process.exit(1); // Clean exit so nodemon retries after delay
+      logger.warn(`⚠️ Port ${env.port} is already in use. Force clearing port...`);
+      try {
+        execSync(`fuser -k ${env.port}/tcp 2>/dev/null || true`);
+      } catch {}
+      setTimeout(() => {
+        httpServer.listen(env.port);
+      }, 1000);
     } else {
       throw err;
     }

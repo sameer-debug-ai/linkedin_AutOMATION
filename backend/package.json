@@ -4,6 +4,7 @@
   "description": "",
   "main": "dist/app.js",
   "scripts": {
+    "predev": "fuser -k 3001/tcp 2>/dev/null || true",
     "dev": "nodemon --delay 1500 --exec tsx src/app.ts",
     "build": "tsc",
     "start": "node dist/app.js",
