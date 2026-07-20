@@ -1,0 +1,32 @@
+# Node
+node_modules/
+backend/node_modules/
+frontend/linkedin-automation-frontend/node_modules/
+
+# Local env files
+.env
+backend/.env
+
+# Angular build output
+.angular/
+frontend/linkedin-automation-frontend/.angular/
+dist/
+frontend/linkedin-automation-frontend/dist/
+
+# LinkedIn session data & screenshots
+backend/data/
+backend/logs/
+logs/
+
+# IDE / Editor config
+.vscode/
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# OS files
+.DS_Store
+Thumbs.db
