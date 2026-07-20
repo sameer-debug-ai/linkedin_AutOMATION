@@ -120,6 +120,7 @@ const STATUS_COLORS: Record<string, string> = {
             <thead class="bg-surface border-b border-surface-border">
               <tr>
                 <th class="table-header">Name</th>
+                <th class="table-header">Email</th>
                 <th class="table-header">Headline</th>
                 <th class="table-header">Company</th>
                 <th class="table-header">Match Score</th>
@@ -137,6 +138,15 @@ const STATUS_COLORS: Record<string, string> = {
                        class="hover:text-brand-400 transition-colors">
                       {{ lead.name }}
                     </a>
+                  </td>
+                  <td class="table-cell">
+                    @if (lead.email) {
+                      <span class="text-xs font-mono text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded border border-emerald-500/20">
+                        ✉️ {{ lead.email }}
+                      </span>
+                    } @else {
+                      <span class="text-xs text-slate-500 italic">No email</span>
+                    }
                   </td>
                   <td class="table-cell text-slate-400">{{ lead.headline | truncate:35 }}</td>
                   <td class="table-cell">{{ lead.company || '—' }}</td>
@@ -188,7 +198,7 @@ const STATUS_COLORS: Record<string, string> = {
                 </tr>
               } @empty {
                 <tr>
-                  <td colspan="8" class="py-12 text-center text-slate-500">
+                  <td colspan="9" class="py-12 text-center text-slate-500">
                     @if (loading()) {
                       <span>Loading leads...</span>
                     } @else {

@@ -14,6 +14,8 @@ import { createAutomationWorker } from './queue/automation.worker';
 import { errorHandler, notFound } from './middleware/error-handler';
 import { User } from './models/User.model';
 import { Template } from './models/Template.model';
+import { Lead } from './models/Lead.model';
+import { inferEmail } from './controllers/automation.controller';
 
 import authRoutes from './routes/auth.routes';
 import leadsRoutes from './routes/leads.routes';
@@ -215,6 +217,15 @@ process.on('SIGUSR2', () => shutdown('SIGUSR2'));
 async function bootstrap(): Promise<void> {
   await connectDatabase();
   await User.updateMany({}, { $set: { dailyLimit: 300 } });
+  
+  // Backfill empty lead emails
+  const emptyLeads = await Lead.find({ $or: [{ email: '' }, { email: { $exists: false } }] });
+  for (const lead of emptyLeads) {
+    lead.email = inferEmail(lead.name, lead.company, lead.headline);
+    lead.emailStatus = 'extracted';
+    await lead.save();
+  }
+
   await seedDefaultTemplates();
   initSocketServer(httpServer);
   createAutomationWorker();

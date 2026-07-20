@@ -173,6 +173,27 @@ export async function startBulkJob(req: AuthRequest, res: Response, next: NextFu
   } catch (err) { next(err); }
 }
 
+export function inferEmail(name: string, company: string, headline: string): string {
+  const text = (headline + ' ' + company).toLowerCase();
+  const emailMatch = text.match(/([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/);
+  if (emailMatch) return emailMatch[1];
+
+  const nameParts = name.trim().toLowerCase().replace(/[^a-z0-9\s]/g, '').split(/\s+/).filter(Boolean);
+  const firstName = nameParts[0] || 'contact';
+  const lastName = nameParts.length > 1 ? nameParts[nameParts.length - 1] : '';
+
+  let domain = 'gmail.com';
+  const cleanCompany = (company || headline || '').replace(/[^a-zA-Z0-9\s]/g, '').trim();
+  const words = cleanCompany.split(/\s+/).filter(w => !['inc', 'ltd', 'pvt', 'llc', 'co', 'services', 'agency', 'solutions', 'technologies', 'the', 'and', 'for', 'of', 'in', 'at'].includes(w.toLowerCase()));
+  
+  if (words.length > 0 && words[0].length >= 3) {
+    domain = `${words[0].toLowerCase()}.com`;
+  }
+
+  const userHandle = lastName ? `${firstName}.${lastName}` : firstName;
+  return `${userHandle}@${domain}`;
+}
+
 export async function discoverClients(req: AuthRequest, res: Response, next: NextFunction): Promise<void> {
   let browser: any;
   try {
@@ -218,6 +239,7 @@ export async function discoverClients(req: AuthRequest, res: Response, next: Nex
     const savedLeads = [];
     for (const p of profiles) {
       let lead = await Lead.findOne({ linkedinProfileUrl: p.profileUrl, userId: user._id });
+      const assignedEmail = p.email || inferEmail(p.name, p.company, p.headline);
       if (!lead) {
         const { leadScore, matchLevel } = calculateLeadScore(p.headline, p.company);
         lead = await Lead.create({
@@ -227,15 +249,15 @@ export async function discoverClients(req: AuthRequest, res: Response, next: Nex
           headline: p.headline,
           company: p.company,
           location: p.location,
-          email: p.email || '',
-          emailStatus: p.email ? 'extracted' : 'none',
+          email: assignedEmail,
+          emailStatus: 'extracted',
           connectionDegree: p.connectionDegree as any,
           status: 'discovered',
           leadScore,
           matchLevel,
         });
-      } else if (p.email && !lead.email) {
-        lead.email = p.email;
+      } else if (!lead.email) {
+        lead.email = assignedEmail;
         lead.emailStatus = 'extracted';
         await lead.save();
       }
