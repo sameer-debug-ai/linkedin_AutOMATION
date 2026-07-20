@@ -6,6 +6,7 @@ export type LeadStatus =
   | 'connected'
   | 'messaged'
   | 'replied'
+  | 'email_sent'
   | 'ignored';
 
 export interface ILead extends Document {
@@ -15,6 +16,8 @@ export interface ILead extends Document {
   headline: string;
   company: string;
   location: string;
+  email?: string;
+  emailStatus?: 'none' | 'extracted' | 'mail_sent' | 'mail_failed';
   connectionDegree: '1st' | '2nd' | '3rd' | 'unknown';
   status: LeadStatus;
   templateUsed?: Types.ObjectId;
@@ -36,10 +39,16 @@ const LeadSchema = new Schema<ILead>(
     headline: { type: String, default: '' },
     company: { type: String, default: '' },
     location: { type: String, default: '' },
+    email: { type: String, default: '' },
+    emailStatus: {
+      type: String,
+      enum: ['none', 'extracted', 'mail_sent', 'mail_failed'],
+      default: 'none',
+    },
     connectionDegree: { type: String, enum: ['1st', '2nd', '3rd', 'unknown'], default: 'unknown' },
     status: {
       type: String,
-      enum: ['discovered', 'request_sent', 'connected', 'messaged', 'replied', 'ignored'],
+      enum: ['discovered', 'request_sent', 'connected', 'messaged', 'replied', 'email_sent', 'ignored'],
       default: 'discovered',
       index: true,
     },

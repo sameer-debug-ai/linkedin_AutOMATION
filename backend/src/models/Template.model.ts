@@ -1,6 +1,6 @@
 import mongoose, { Document, Schema, Types } from 'mongoose';
 
-export type TemplateType = 'connection_note' | 'direct_message' | 'inmail';
+export type TemplateType = 'connection_note' | 'direct_message' | 'inmail' | 'email';
 
 export interface ITemplate extends Document {
   userId: Types.ObjectId;
@@ -20,7 +20,7 @@ const TemplateSchema = new Schema<ITemplate>(
     name: { type: String, required: true, trim: true },
     type: {
       type: String,
-      enum: ['connection_note', 'direct_message', 'inmail'],
+      enum: ['connection_note', 'direct_message', 'inmail', 'email'],
       default: 'connection_note',
     },
     subject: { type: String, default: '' },

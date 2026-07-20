@@ -142,6 +142,7 @@ interface Template { _id: string; name: string; type: string; }
                     <th class="table-header">Name</th>
                     <th class="table-header">Headline</th>
                     <th class="table-header">Company</th>
+                    <th class="table-header">Email</th>
                     <th class="table-header">Match Score</th>
                     <th class="table-header">Degree</th>
                   </tr>
@@ -159,6 +160,9 @@ interface Template { _id: string; name: string; type: string; }
                       </td>
                       <td class="table-cell text-slate-400 text-xs">{{ lead.headline | truncate:40 }}</td>
                       <td class="table-cell text-xs">{{ lead.company || '—' }}</td>
+                      <td class="table-cell text-xs font-mono text-indigo-400">
+                        {{ lead.email || 'No email' }}
+                      </td>
                       <td class="table-cell">
                         @if (lead.matchLevel === 'high') {
                           <span class="px-2 py-0.5 rounded-full text-[11px] font-semibold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
@@ -188,6 +192,16 @@ interface Template { _id: string; name: string; type: string; }
               </span>
               <div class="flex items-center gap-3">
                 <button (click)="closeDiscoveredModal()" class="btn-ghost text-xs px-4 py-2 border border-surface-border">Cancel</button>
+                <button 
+                  (click)="sendBulkEmailFromModal()" 
+                  [disabled]="selectedModalIds().size === 0 || sendingBulkEmailModal()"
+                  class="btn-primary bg-indigo-600 hover:bg-indigo-500 text-white font-bold h-10 text-xs sm:text-sm flex items-center gap-2 px-5 rounded-xl shadow-lg border border-indigo-400/30">
+                  @if (sendingBulkEmailModal()) {
+                    <span class="animate-spin">✉️</span> Sending Emails...
+                  } @else {
+                    📧 Send Bulk Emails ({{ selectedModalIds().size }})
+                  }
+                </button>
                 <button 
                   (click)="sendBulkFromModal()" 
                   [disabled]="selectedModalIds().size === 0 || sendingBulkModal()"
@@ -229,6 +243,7 @@ export class SearchConfigComponent {
   discoveredLeads     = signal<Lead[]>([]);
   selectedModalIds    = signal<Set<string>>(new Set());
   sendingBulkModal    = signal(false);
+  sendingBulkEmailModal = signal(false);
 
   constructor(private api: ApiService) {
     this.api.get<{ data: Template[] }>('/templates').subscribe((r) => this.templates.set(r.data));
@@ -317,6 +332,30 @@ export class SearchConfigComponent {
       error: (err) => {
         this.sendingBulkModal.set(false);
         this.message.set(err?.error?.message || 'Failed to dispatch bulk requests.');
+        this.messageError.set(true);
+      },
+    });
+  }
+
+  sendBulkEmailFromModal() {
+    const ids = Array.from(this.selectedModalIds());
+    if (ids.length === 0 || !this.config.templateId) return;
+
+    this.sendingBulkEmailModal.set(true);
+    this.api.post<{ success: boolean; message: string; sentCount: number }>('/automation/bulk-email', {
+      leadIds: ids,
+      templateId: this.config.templateId,
+    }).subscribe({
+      next: (res) => {
+        this.sendingBulkEmailModal.set(false);
+        this.showDiscoveredModal.set(false);
+        this.message.set(`📧 ${res.message} Bulk email campaign executed!`);
+        this.messageError.set(false);
+        this.leadsTableComponent?.loadLeads();
+      },
+      error: (err) => {
+        this.sendingBulkEmailModal.set(false);
+        this.message.set(err?.error?.message || 'Failed to dispatch bulk email campaign.');
         this.messageError.set(true);
       },
     });

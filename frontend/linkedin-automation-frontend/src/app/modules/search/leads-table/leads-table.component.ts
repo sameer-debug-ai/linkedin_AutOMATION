@@ -11,8 +11,9 @@ export interface Lead {
   headline: string;
   company: string;
   location: string;
+  email?: string;
   connectionDegree: '1st' | '2nd' | '3rd';
-  status: 'discovered' | 'request_sent' | 'connected' | 'messaged' | 'replied' | 'ignored';
+  status: 'discovered' | 'request_sent' | 'connected' | 'messaged' | 'replied' | 'email_sent' | 'ignored';
   leadScore?: number;
   matchLevel?: 'high' | 'medium' | 'low';
   linkedinProfileUrl: string;
@@ -31,6 +32,7 @@ const STATUS_COLORS: Record<string, string> = {
   connected:    'badge-green',
   messaged:     'badge-yellow',
   replied:      'badge-purple',
+  email_sent:   'badge-purple',
   ignored:      'badge-red',
 };
 
@@ -66,6 +68,7 @@ const STATUS_COLORS: Record<string, string> = {
               <option value="connected">Connected</option>
               <option value="messaged">Messaged</option>
               <option value="replied">Replied</option>
+              <option value="email_sent">Email Sent</option>
               <option value="ignored">Ignored</option>
             </select>
             <span class="absolute inset-y-0 right-0 flex items-center pr-3 pointer-events-none text-slate-500 text-xs">
@@ -177,6 +180,7 @@ const STATUS_COLORS: Record<string, string> = {
                         <option value="connected">Connected</option>
                         <option value="messaged">Messaged</option>
                         <option value="replied">Replied</option>
+                        <option value="email_sent">Email Sent</option>
                         <option value="ignored">Ignored</option>
                       </select>
                     </div>

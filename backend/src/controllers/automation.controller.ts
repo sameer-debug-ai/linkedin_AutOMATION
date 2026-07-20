@@ -12,7 +12,9 @@ import { createBrowserContext, closeBrowser } from '../automation/browser';
 import { verifyLinkedInSession } from '../automation/linkedin-login';
 import { syncLinkedInResponses } from '../automation/linkedin-sync';
 import { Lead, calculateLeadScore } from '../models/Lead.model';
+import { Template } from '../models/Template.model';
 import { searchLinkedInPeople } from '../automation/linkedin-search';
+import { sendEmail } from '../services/email.service';
 
 export async function startJob(req: AuthRequest, res: Response, next: NextFunction): Promise<void> {
   try {
@@ -225,11 +227,17 @@ export async function discoverClients(req: AuthRequest, res: Response, next: Nex
           headline: p.headline,
           company: p.company,
           location: p.location,
+          email: p.email || '',
+          emailStatus: p.email ? 'extracted' : 'none',
           connectionDegree: p.connectionDegree as any,
           status: 'discovered',
           leadScore,
           matchLevel,
         });
+      } else if (p.email && !lead.email) {
+        lead.email = p.email;
+        lead.emailStatus = 'extracted';
+        await lead.save();
       }
       savedLeads.push(lead);
     }
@@ -241,5 +249,66 @@ export async function discoverClients(req: AuthRequest, res: Response, next: Nex
     if (browser) {
       await closeBrowser(browser);
     }
+  }
+}
+
+export async function bulkSendEmails(req: AuthRequest, res: Response, next: NextFunction): Promise<void> {
+  try {
+    const { leadIds, templateId } = req.body;
+    if (!Array.isArray(leadIds) || leadIds.length === 0) {
+      next(createError('leadIds array is required', 400)); return;
+    }
+
+    const template = await Template.findById(templateId);
+    if (!template) {
+      next(createError('Template not found', 404)); return;
+    }
+
+    const leads = await Lead.find({ _id: { $in: leadIds }, userId: req.userId });
+    let sentCount = 0;
+
+    for (const lead of leads) {
+      const recipientEmail = lead.email;
+      if (!recipientEmail) continue;
+
+      const firstName = lead.name ? lead.name.split(' ')[0] : 'There';
+      const lastName = lead.name && lead.name.split(' ').length > 1 ? lead.name.split(' ').slice(1).join(' ') : '';
+      
+      let bodyText = template.body
+        .replace(/\{\{firstName\}\}/g, firstName)
+        .replace(/\{\{lastName\}\}/g, lastName)
+        .replace(/\{\{company\}\}/g, lead.company || 'your agency')
+        .replace(/\{\{headline\}\}/g, lead.headline || '');
+
+      let subjectText = (template.subject || 'Collaboration Opportunity')
+        .replace(/\{\{firstName\}\}/g, firstName)
+        .replace(/\{\{company\}\}/g, lead.company || '');
+
+      const ok = await sendEmail({
+        to: recipientEmail,
+        subject: subjectText,
+        text: bodyText,
+      });
+
+      if (ok) {
+        sentCount++;
+        lead.emailStatus = 'mail_sent';
+        lead.status = 'email_sent';
+        lead.templateUsed = template._id as any;
+        lead.messageSentAt = new Date();
+        await lead.save();
+      } else {
+        lead.emailStatus = 'mail_failed';
+        await lead.save();
+      }
+    }
+
+    res.json({
+      success: true,
+      message: `Emails processed for ${leads.length} leads (${sentCount} sent successfully).`,
+      sentCount,
+    });
+  } catch (err) {
+    next(err);
   }
 }

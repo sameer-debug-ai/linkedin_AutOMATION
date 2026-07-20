@@ -10,6 +10,7 @@ export interface LeadProfile {
   location: string;
   profileUrl: string;
   connectionDegree: string;
+  email?: string;
 }
 
 export function normalizeUrl(url: string): string {
@@ -171,13 +172,18 @@ export async function searchLinkedInPeople(
           const headline = cleanSpans[0] || '';
           const location = cleanSpans[1] || '';
 
+          // Extract email if visible in card text
+          const emailMatch = cardText.match(/([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/);
+          const email = emailMatch ? emailMatch[1] : '';
+
           return {
             name,
             headline,
             company: '',
             location,
             profileUrl,
-            connectionDegree: degree
+            connectionDegree: degree,
+            email
           };
         });
       });
@@ -208,7 +214,8 @@ export async function searchLinkedInPeople(
           company: lead.company,
           location: lead.location,
           profileUrl: lead.profileUrl,
-          connectionDegree: lead.connectionDegree
+          connectionDegree: lead.connectionDegree,
+          email: lead.email
         });
       }
 
