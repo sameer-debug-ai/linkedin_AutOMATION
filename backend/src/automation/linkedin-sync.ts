@@ -3,7 +3,7 @@ import { Lead } from '../models/Lead.model';
 import { ActivityLog } from '../models/ActivityLog.model';
 import { logger } from '../config/logger';
 import { shortDelay, humanScroll } from './human-delay';
-import { normalizeUrl } from './linkedin-search';
+import { normalizeUrl, cleanLinkedInName } from './linkedin-search';
 import { getSocketServer } from '../queue/socket';
 
 export interface SyncResult {
@@ -31,8 +31,9 @@ export async function syncLinkedInResponses(
       waitUntil: 'domcontentloaded',
       timeout: 30000,
     });
-    await shortDelay(2000, 4000);
+    await shortDelay(2000, 3500);
     await humanScroll(page);
+    await shortDelay(1000, 2000);
 
     const connectionUrls = await page.evaluate(() => {
       const anchors = Array.from(document.querySelectorAll('a[href*="/in/"]'));
@@ -73,19 +74,36 @@ export async function syncLinkedInResponses(
       timeout: 30000,
     });
     await shortDelay(2500, 4000);
+    await humanScroll(page);
 
-    const messagingProfiles = await page.evaluate(() => {
-      const links = Array.from(document.querySelectorAll('.msg-conversation-listitem a[href*="/in/"], .msg-thread a[href*="/in/"]'));
-      const textNodes = Array.from(document.querySelectorAll('.msg-conversation-card__participant-names, .msg-conversation-listitem__participant-names'));
+    const messagingCards = await page.evaluate(() => {
+      const cards = Array.from(document.querySelectorAll('.msg-conversation-listitem, .msg-conversation-card'));
       
-      const urls = links.map(l => (l as HTMLAnchorElement).href);
-      const names = textNodes.map(t => t.textContent?.trim()).filter(Boolean);
-      
-      return { urls, names };
+      return cards.map(card => {
+        const link = card.querySelector('a[href*="/in/"]') as HTMLAnchorElement | null;
+        const profileUrl = link ? (link.href || '').split('?')[0].trim() : '';
+        
+        const nameEl = card.querySelector('.msg-conversation-card__participant-names, .msg-conversation-listitem__participant-names, .msg-entity-lockup__title');
+        const rawName = nameEl ? (nameEl.textContent || '').trim() : '';
+
+        const cardText = (card.textContent || '').trim().replace(/\s+/g, ' ');
+        
+        const isUnread = card.classList.contains('msg-conversation-listitem--unread') || 
+                         card.classList.contains('msg-conversation-card--unread') ||
+                         !!card.querySelector('.msg-conversation-card__unread-count, .notification-badge');
+
+        // Check if last message was sent by "You"
+        const isFromYou = cardText.includes('You:') || cardText.includes('You sent');
+
+        return {
+          rawName,
+          profileUrl,
+          isUnread,
+          isFromYou,
+          hasReplied: isUnread || !isFromYou
+        };
+      }).filter(item => item.rawName || item.profileUrl);
     });
-
-    const normalizedMessagingUrls = new Set(messagingProfiles.urls.map(u => normalizeUrl(u)));
-    const messagingNames = new Set((messagingProfiles.names as string[]).map(n => n.toLowerCase()));
 
     // Find leads that were messaged or request sent
     const messagedLeads = await Lead.find({
@@ -95,9 +113,16 @@ export async function syncLinkedInResponses(
 
     for (const lead of messagedLeads) {
       const normUrl = normalizeUrl(lead.linkedinProfileUrl);
-      const leadNameLower = lead.name.toLowerCase();
+      const cleanedLeadName = cleanLinkedInName(lead.name).toLowerCase();
 
-      if (normalizedMessagingUrls.has(normUrl) || messagingNames.has(leadNameLower)) {
+      // Find matching card by profile URL or clean name
+      const match = messagingCards.find(card => {
+        const cardNormUrl = card.profileUrl ? normalizeUrl(card.profileUrl) : '';
+        const cardCleanName = cleanLinkedInName(card.rawName).toLowerCase();
+        return (cardNormUrl && cardNormUrl === normUrl) || (cardCleanName && cardCleanName === cleanedLeadName);
+      });
+
+      if (match && match.hasReplied) {
         if (lead.status !== 'replied') {
           lead.status = 'replied';
           lead.repliedAt = new Date();

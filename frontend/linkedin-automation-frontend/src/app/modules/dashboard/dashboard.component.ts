@@ -52,7 +52,7 @@ interface DailyUsage { used: number; limit: number; remaining: number; }
             <button (click)="saveCookies()" [disabled]="saving() || !cookieInput.trim()" class="btn-primary py-2 text-xs">
               {{ saving() ? 'Saving...' : '💾 Save Cookies' }}
             </button>
-            <button (click)="checkSession()" [disabled]="sessionStatus() === 'checking'" class="btn-secondary py-2 text-xs">
+            <button (click)="checkSession(true)" [disabled]="sessionStatus() === 'checking'" class="btn-secondary py-2 text-xs">
               🔄 Test Connection Status
             </button>
             @if (cookieFeedback()) {
@@ -156,9 +156,10 @@ export class DashboardComponent implements OnInit {
     this.api.get<{ success: boolean; data: DailyUsage }>('/automation/daily-usage').subscribe((r) => this.usage.set(r.data));
   }
 
-  checkSession() {
+  checkSession(live = false) {
     this.sessionStatus.set('checking');
-    this.api.get<{ success: boolean; sessionValid: boolean }>('/auth/linkedin/session-status').subscribe({
+    const url = live ? '/auth/linkedin/session-status?live=true' : '/auth/linkedin/session-status';
+    this.api.get<{ success: boolean; sessionValid: boolean }>(url).subscribe({
       next: (r) => {
         this.sessionStatus.set(r.sessionValid ? 'valid' : 'invalid');
       },

@@ -21,6 +21,31 @@ export function normalizeUrl(url: string): string {
   return cleaned.toLowerCase();
 }
 
+export function cleanLinkedInName(name: string): string {
+  if (!name) return '';
+  let cleaned = name.replace(/\s+/g, ' ').trim();
+  
+  // Remove degree indicators, hiring/open badges
+  cleaned = cleaned.replace(/\s*•\s*(1st|2nd|3rd\+?)$/i, '');
+  cleaned = cleaned.replace(/\b(1st|2nd|3rd\+?)\b/gi, '');
+  cleaned = cleaned.replace(/\b(is\s+)?hiring\b/gi, '');
+  cleaned = cleaned.replace(/\b(is\s+)?open\s+to\s+work\b/gi, '');
+  cleaned = cleaned.replace(/\b(Premium|Verified)\b/gi, '');
+  cleaned = cleaned.replace(/[•·]/g, '').replace(/\s+/g, ' ').trim();
+
+  // If the name is duplicated, e.g. "Ameet Sidhoe Ameet Sidhoe" or "Ameet SidhoeAmeet Sidhoe"
+  const len = cleaned.length;
+  for (let i = 1; i <= Math.floor(len / 2); i++) {
+    const firstHalf = cleaned.slice(0, i).trim();
+    const secondHalf = cleaned.slice(i).trim();
+    if (firstHalf && firstHalf === secondHalf) {
+      cleaned = firstHalf;
+      break;
+    }
+  }
+  return cleaned.trim();
+}
+
 export async function searchLinkedInPeople(
   context: BrowserContext,
   keywords: string[],
@@ -165,11 +190,12 @@ export async function searchLinkedInPeople(
       for (const lead of extractedLeads) {
         if (leads.length >= maxResults) break;
         if (!lead.profileUrl) continue;
-        if (lead.name.toLowerCase().includes('linkedin member')) continue;
+        const cleanedName = cleanLinkedInName(lead.name);
+        if (cleanedName.toLowerCase().includes('linkedin member')) continue;
 
         const normUrl = normalizeUrl(lead.profileUrl);
         if (excludeUrls && excludeUrls.has(normUrl)) {
-          logger.info(`[Search] Skipping already actioned lead in search: ${lead.name} (${lead.profileUrl})`);
+          logger.info(`[Search] Skipping already actioned lead in search: ${cleanedName} (${lead.profileUrl})`);
           continue;
         }
 
@@ -177,7 +203,7 @@ export async function searchLinkedInPeople(
         if (leads.some((l) => normalizeUrl(l.profileUrl) === normUrl)) continue;
         
         leads.push({
-          name: lead.name,
+          name: cleanedName,
           headline: lead.headline,
           company: lead.company,
           location: lead.location,
@@ -186,11 +212,12 @@ export async function searchLinkedInPeople(
         });
       }
 
-      // Paginate using testid or fallback text selectors
-      const nextBtn = page.locator('button[data-testid="pagination-controls-next-button-visible"], button:has-text("Next"), a:has-text("Next")').first();
+      // Paginate using specific pagination selectors
+      const nextBtn = page.locator('button[aria-label="Next"], button[data-testid="pagination-controls-next-button-visible"], .artdeco-pagination__button--next, button.artdeco-pagination__button--next').first();
       const isNextEnabled = await nextBtn.isEnabled({ timeout: 2000 }).catch(() => false);
       if (isNextEnabled && leads.length < maxResults) {
-        await nextBtn.click();
+        await nextBtn.scrollIntoViewIfNeeded().catch(() => {});
+        await nextBtn.click({ force: true });
         await randomDelay(8000, 15000); // Delay between search pages
         pageNum++;
       } else {

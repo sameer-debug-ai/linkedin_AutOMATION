@@ -6,7 +6,7 @@ import { User } from '../models/User.model';
 import { env } from '../config/env';
 import { logger } from '../config/logger';
 import { createError } from '../middleware/error-handler';
-import { createBrowserContext } from '../automation/browser';
+import { createBrowserContext, closeBrowser } from '../automation/browser';
 import { verifyLinkedInSession, manualLogin } from '../automation/linkedin-login';
 
 function signToken(userId: string): string {
@@ -67,6 +67,7 @@ export async function saveLinkedInSession(req: Request & { userId?: string }, re
 }
 
 export async function checkSessionStatus(req: Request & { userId?: string }, res: Response, next: NextFunction): Promise<void> {
+  let browser: any;
   try {
     const user = await User.findById(req.userId);
     if (!user?.linkedinCookies) {
@@ -100,16 +101,24 @@ export async function checkSessionStatus(req: Request & { userId?: string }, res
       }
     }
 
-    // JSESSIONID is also expected for authenticated sessions
-    const hasJsession = cookies.some(c => c.name === 'JSESSIONID');
-    if (!hasJsession) {
-      logger.warn('[SessionCheck] JSESSIONID missing from cookies');
+    if (req.query.live === 'true') {
+      const contextResult = await createBrowserContext(cookiesJsonStr);
+      browser = contextResult.browser;
+      const isValidOnLinkedIn = await verifyLinkedInSession(contextResult.context);
+      if (!isValidOnLinkedIn) {
+        res.json({ success: true, sessionValid: false, reason: 'linkedin_session_expired' });
+        return;
+      }
     }
 
-    logger.info(`[SessionCheck] li_at present ✅, expires: ${liAtCookie.expirationDate ? new Date(liAtCookie.expirationDate * 1000).toISOString() : 'unknown'}, jsession: ${hasJsession}`);
-    // Cookies look valid locally — actual LinkedIn access verified when automation runs
     res.json({ success: true, sessionValid: true, reason: 'connected' });
-  } catch (err) { next(err); }
+  } catch (err) { 
+    next(err); 
+  } finally {
+    if (browser) {
+      await closeBrowser(browser);
+    }
+  }
 }
 
 

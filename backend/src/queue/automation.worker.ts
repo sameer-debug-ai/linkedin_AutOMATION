@@ -4,7 +4,7 @@ import IORedis from 'ioredis';
 import { env } from '../config/env';
 import { logger } from '../config/logger';
 import { AutomationJob } from '../models/AutomationJob.model';
-import { Lead } from '../models/Lead.model';
+import { Lead, calculateLeadScore } from '../models/Lead.model';
 import { ActivityLog } from '../models/ActivityLog.model';
 import { Template } from '../models/Template.model';
 import { User } from '../models/User.model';
@@ -89,35 +89,51 @@ export function createAutomationWorker(): Worker {
 
         const targetCount = Math.min(dbJob.config.targetCount, remaining);
 
-        // Fetch already actioned leads to exclude them from search results
-        const actionedLeads = await Lead.find({
-          userId,
-          status: { $in: ['request_sent', 'connected', 'messaged'] }
-        }, 'linkedinProfileUrl');
-        const excludeUrls = new Set(actionedLeads.map(l => normalizeUrl(l.linkedinProfileUrl)));
+        let profiles: Array<{ name: string; profileUrl: string; headline: string; company: string; location: string; connectionDegree: string }> = [];
 
-        // Search for leads
-        emit('job:log', { message: `Searching for: ${dbJob.config.keywords.join(', ')} in ${dbJob.config.location}` });
-        const profiles = await searchLinkedInPeople(
-          context,
-          dbJob.config.keywords,
-          dbJob.config.location,
-          targetCount,
-          excludeUrls,
-          async () => {
-            emit('job:captcha', { jobId, message: 'CAPTCHA detected — automation paused. Please check the browser.' });
-            await AutomationJob.findByIdAndUpdate(jobId, { status: 'paused' });
-          }
-        );
+        if (job.data.leadIds && Array.isArray(job.data.leadIds) && job.data.leadIds.length > 0) {
+          emit('job:log', { message: `⚡ Direct Bulk Outreach Mode: Loading ${job.data.leadIds.length} selected leads...` });
+          const selectedLeads = await Lead.find({ _id: { $in: job.data.leadIds }, userId });
+          profiles = selectedLeads.map((l) => ({
+            name: l.name,
+            profileUrl: l.linkedinProfileUrl,
+            headline: l.headline || '',
+            company: l.company || '',
+            location: l.location || '',
+            connectionDegree: l.connectionDegree || 'unknown',
+          }));
+        } else {
+          // Fetch already actioned leads to exclude them from search results
+          const actionedLeads = await Lead.find({
+            userId,
+            status: { $in: ['request_sent', 'connected', 'messaged'] }
+          }, 'linkedinProfileUrl');
+          const excludeUrls = new Set(actionedLeads.map(l => normalizeUrl(l.linkedinProfileUrl)));
+
+          // Search for leads
+          emit('job:log', { message: `Searching for: ${dbJob.config.keywords.join(', ')} in ${dbJob.config.location}` });
+          profiles = await searchLinkedInPeople(
+            context,
+            dbJob.config.keywords,
+            dbJob.config.location,
+            targetCount,
+            excludeUrls,
+            async () => {
+              emit('job:captcha', { jobId, message: 'CAPTCHA detected — automation paused. Please check the browser.' });
+              await AutomationJob.findByIdAndUpdate(jobId, { status: 'paused' });
+            }
+          );
+        }
 
         emit('job:log', { message: `Found ${profiles.length} profiles. Starting outreach...` });
 
-        // Shuffle profiles for less predictable pattern
+        // Shuffle profiles and process in parallel batches
         const shuffled = profiles.sort(() => Math.random() - 0.5);
         let processed = 0, successful = 0, failed = 0, skipped = 0;
 
-        for (const profile of shuffled) {
-          // Re-check daily limit each iteration
+        const BATCH_SIZE = 3; // 3 profiles in parallel simultaneously
+        for (let i = 0; i < shuffled.length; i += BATCH_SIZE) {
+          // Re-check daily limit each batch
           const currentCount = await ActivityLog.countDocuments({
             userId,
             action: { $in: ['connect_sent', 'message_sent'] },
@@ -136,87 +152,101 @@ export function createAutomationWorker(): Worker {
             break;
           }
 
-          try {
-            // Save or find existing lead
-            let lead = await Lead.findOne({ linkedinProfileUrl: profile.profileUrl });
-            if (!lead) {
-              lead = await Lead.create({
-                userId,
-                linkedinProfileUrl: profile.profileUrl,
-                name: profile.name,
-                headline: profile.headline,
-                company: profile.company,
-                location: profile.location,
-                connectionDegree: profile.connectionDegree as '1st' | '2nd' | '3rd' | 'unknown',
-                status: 'discovered',
-              });
-            }
+          const batch = shuffled.slice(i, i + BATCH_SIZE);
+          emit('job:log', { message: `⚡ Executing parallel batch of ${batch.length} requests...` });
 
-            // Skip if already actioned
-            if (['request_sent', 'connected', 'messaged'].includes(lead.status)) {
-              skipped++;
-              continue;
-            }
+          let captchaTriggered = false;
 
-            const firstName = profile.name.split(' ')[0];
-            const personalised = personaliseTemplate(template.body, {
-              firstName,
-              company: profile.company,
-              headline: profile.headline,
-            });
-
-            emit('job:log', { message: `Processing: ${profile.name} — ${profile.profileUrl}` });
-
-            if (dbJob.config.actionType === 'connect' || dbJob.config.actionType === 'both') {
-              if (profile.connectionDegree !== '1st') {
-                const noteToSend = dbJob.config.actionType === 'connect' ? '' : personalised.slice(0, 200);
-                const result = await sendConnectionRequest(context, profile.profileUrl, noteToSend);
-                if (result === 'captcha') {
-                  await AutomationJob.findByIdAndUpdate(jobId, { status: 'paused' });
-                  emit('job:captcha', { jobId });
-                  break;
+          await Promise.all(
+            batch.map(async (profile) => {
+              try {
+                // Save or find existing lead
+                let lead = await Lead.findOne({ linkedinProfileUrl: profile.profileUrl });
+                if (!lead) {
+                  const { leadScore, matchLevel } = calculateLeadScore(profile.headline, profile.company);
+                  lead = await Lead.create({
+                    userId,
+                    linkedinProfileUrl: profile.profileUrl,
+                    name: profile.name,
+                    headline: profile.headline,
+                    company: profile.company,
+                    location: profile.location,
+                    connectionDegree: profile.connectionDegree as '1st' | '2nd' | '3rd' | 'unknown',
+                    status: 'discovered',
+                    leadScore,
+                    matchLevel,
+                  });
                 }
-                if (result === 'sent') {
-                  await lead.updateOne({ status: 'request_sent', templateUsed: template._id, messageSentAt: new Date() });
-                  await ActivityLog.create({ userId, leadId: lead._id, jobId, action: 'connect_sent', details: `Sent to ${profile.name}` });
-                  successful++;
-                  emit('lead:updated', { leadId: lead._id, status: 'request_sent', name: profile.name });
-                  emit('job:log', { message: `✅ Connection request sent to ${profile.name}` });
-                } else if (result === 'already_connected') {
-                  await lead.updateOne({ status: 'connected' });
-                  await ActivityLog.create({ userId, leadId: lead._id, jobId, action: 'connected', details: `${profile.name} is connected` });
-                  emit('lead:updated', { leadId: lead._id, status: 'connected', name: profile.name });
-                  emit('job:log', { message: `🤝 ${profile.name} is already connected` });
-                } else if (result === 'pending') {
-                  await lead.updateOne({ status: 'request_sent' });
-                  emit('lead:updated', { leadId: lead._id, status: 'request_sent', name: profile.name });
+
+                // Skip if already actioned
+                if (['request_sent', 'connected', 'messaged'].includes(lead.status)) {
+                  skipped++;
+                  return;
                 }
+
+                const firstName = profile.name.split(' ')[0];
+                const personalised = personaliseTemplate(template.body, {
+                  firstName,
+                  company: profile.company,
+                  headline: profile.headline,
+                });
+
+                emit('job:log', { message: `🚀 Sending: ${profile.name}` });
+
+                if (dbJob.config.actionType === 'connect' || dbJob.config.actionType === 'both') {
+                  if (profile.connectionDegree !== '1st') {
+                    const noteToSend = dbJob.config.actionType === 'connect' ? '' : personalised.slice(0, 200);
+                    const result = await sendConnectionRequest(context, profile.profileUrl, noteToSend);
+                    if (result === 'captcha') {
+                      captchaTriggered = true;
+                      return;
+                    }
+                    if (result === 'sent') {
+                      await lead.updateOne({ status: 'request_sent', templateUsed: template._id, messageSentAt: new Date() });
+                      await ActivityLog.create({ userId, leadId: lead._id, jobId, action: 'connect_sent', details: `Sent to ${profile.name}` });
+                      successful++;
+                      emit('lead:updated', { leadId: lead._id, status: 'request_sent', name: profile.name });
+                      emit('job:log', { message: `✅ Connection request sent to ${profile.name}` });
+                    } else if (result === 'already_connected') {
+                      await lead.updateOne({ status: 'connected' });
+                      await ActivityLog.create({ userId, leadId: lead._id, jobId, action: 'connected', details: `${profile.name} is connected` });
+                      emit('lead:updated', { leadId: lead._id, status: 'connected', name: profile.name });
+                      emit('job:log', { message: `🤝 ${profile.name} is already connected` });
+                    } else if (result === 'pending') {
+                      await lead.updateOne({ status: 'request_sent' });
+                      emit('lead:updated', { leadId: lead._id, status: 'request_sent', name: profile.name });
+                    }
+                  }
+                }
+
+                if (dbJob.config.actionType === 'message' || (dbJob.config.actionType === 'both' && profile.connectionDegree === '1st')) {
+                  if (profile.connectionDegree === '1st') {
+                    const result = await sendDirectMessage(context, profile.profileUrl, personalised);
+                    if (result === 'sent') {
+                      await lead.updateOne({ status: 'messaged', templateUsed: template._id, messageSentAt: new Date() });
+                      await ActivityLog.create({ userId, leadId: lead._id, jobId, action: 'message_sent', details: `Message sent to ${profile.name}` });
+                      successful++;
+                      emit('lead:updated', { leadId: lead._id, status: 'messaged', name: profile.name });
+                      emit('job:log', { message: `✅ Message sent to ${profile.name}` });
+                    }
+                  }
+                }
+
+                processed++;
+                await AutomationJob.findByIdAndUpdate(jobId, { 'progress.processed': processed, 'progress.successful': successful });
+                emit('job:progress', { jobId, processed, successful, failed, skipped, total: shuffled.length });
+              } catch (err) {
+                failed++;
+                logger.error(`[Worker] Error processing ${profile.profileUrl}:`, err);
+                await ActivityLog.create({ userId, jobId, action: 'error', details: `Error on ${profile.name}: ${String(err)}` });
               }
-            }
+            })
+          );
 
-            if (dbJob.config.actionType === 'message' || (dbJob.config.actionType === 'both' && profile.connectionDegree === '1st')) {
-              if (profile.connectionDegree === '1st') {
-                const result = await sendDirectMessage(context, profile.profileUrl, personalised);
-                if (result === 'sent') {
-                  await lead.updateOne({ status: 'messaged', templateUsed: template._id, messageSentAt: new Date() });
-                  await ActivityLog.create({ userId, leadId: lead._id, jobId, action: 'message_sent', details: `Message sent to ${profile.name}` });
-                  successful++;
-                  emit('lead:updated', { leadId: lead._id, status: 'messaged', name: profile.name });
-                  emit('job:log', { message: `✅ Message sent to ${profile.name}` });
-                }
-              }
-            }
-
-            processed++;
-            await AutomationJob.findByIdAndUpdate(jobId, { 'progress.processed': processed, 'progress.successful': successful });
-            emit('job:progress', { jobId, processed, successful, failed, skipped, total: shuffled.length });
-
-            // Human-like delay between each action
-            await randomDelay();
-          } catch (err) {
-            failed++;
-            logger.error(`[Worker] Error processing ${profile.profileUrl}:`, err);
-            await ActivityLog.create({ userId, jobId, action: 'error', details: `Error on ${profile.name}: ${String(err)}` });
+          if (captchaTriggered) {
+            await AutomationJob.findByIdAndUpdate(jobId, { status: 'paused' });
+            emit('job:captcha', { jobId });
+            break;
           }
         }
 
@@ -239,7 +269,12 @@ export function createAutomationWorker(): Worker {
         await closeBrowser(browser);
       }
     },
-    { connection: redisConnection, concurrency: 1 }
+    {
+      connection: redisConnection,
+      concurrency: 1,
+      lockDuration: 300000,
+      stalledInterval: 60000,
+    }
   );
 
   worker.on('failed', async (job, err) => {

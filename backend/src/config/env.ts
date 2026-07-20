@@ -22,8 +22,8 @@ export const env = {
   },
   playwright: {
     headless: process.env.PLAYWRIGHT_HEADLESS === 'true',
-    minDelayMs: Number(process.env.MIN_DELAY_MS) || 30000,
-    maxDelayMs: Number(process.env.MAX_DELAY_MS) || 90000,
+    minDelayMs: Number(process.env.MIN_DELAY_MS) || 2000,
+    maxDelayMs: Number(process.env.MAX_DELAY_MS) || 5000,
     dailyActionLimit: Number(process.env.DAILY_ACTION_LIMIT) || 25,
   },
   linkedin: {
