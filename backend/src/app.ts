@@ -212,6 +212,7 @@ process.on('SIGINT',  () => shutdown('SIGINT'));
 // Start
 async function bootstrap(): Promise<void> {
   await connectDatabase();
+  await User.updateMany({}, { $set: { dailyLimit: 300 } });
   await seedDefaultTemplates();
   initSocketServer(httpServer);
   createAutomationWorker();

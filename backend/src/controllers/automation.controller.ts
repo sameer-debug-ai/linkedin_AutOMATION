@@ -98,7 +98,7 @@ export async function getDailyUsage(req: AuthRequest, res: Response, next: NextF
       ActivityLog.countDocuments({ userId: req.userId, action: { $in: ['connect_sent', 'message_sent'] }, timestamp: { $gte: today } }),
       User.findById(req.userId),
     ]);
-    res.json({ success: true, data: { used, limit: user?.dailyLimit || 25, remaining: Math.max(0, (user?.dailyLimit || 25) - used) } });
+    res.json({ success: true, data: { used, limit: user?.dailyLimit || 300, remaining: Math.max(0, (user?.dailyLimit || 300) - used) } });
   } catch (err) { next(err); }
 }
 

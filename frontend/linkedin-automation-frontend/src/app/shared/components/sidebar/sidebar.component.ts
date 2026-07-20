@@ -74,7 +74,7 @@ export class SidebarComponent {
 
   userEmail    = computed(() => this.auth.user()?.email ?? '');
   userInitial  = computed(() => (this.auth.user()?.email?.[0] ?? 'U').toUpperCase());
-  dailyLimit   = computed(() => this.auth.user()?.dailyLimit ?? 25);
+  dailyLimit   = computed(() => this.auth.user()?.dailyLimit ?? 300);
   wsConnected  = this.ws.isConnected;
 
   constructor(private auth: AuthService, private ws: WebSocketService) {}

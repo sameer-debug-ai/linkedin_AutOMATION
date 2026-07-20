@@ -17,7 +17,7 @@ const UserSchema = new Schema<IUser>(
     email: { type: String, required: true, unique: true, lowercase: true, trim: true },
     passwordHash: { type: String, required: true },
     linkedinCookies: { type: String, default: '' },
-    dailyLimit: { type: Number, default: 100, min: 1, max: 200 },
+    dailyLimit: { type: Number, default: 300, min: 1, max: 1000 },
     timezone: { type: String, default: 'Asia/Kolkata' },
   },
   { timestamps: true }
